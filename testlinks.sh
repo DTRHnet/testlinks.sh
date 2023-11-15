@@ -15,6 +15,7 @@
 # I/O Globals ----
                   # Default Value     Summary
                   #
+ARGV=$#           #                   **
 LIST_FILE=$1      # (/tmp/links.lst)  Where will the list be created, and under what name 
 GEN_TOTAL=$2      # (100)             How many links will be generated and test
 GEN_TYPE=$3       # (0)               What host company method will be used
@@ -40,7 +41,8 @@ valid_url=()
 
 # If it already exists, empty the file which will be used to store the randomly generated data set. 
 # Otherwise, create a new file to work with
-[ -f ${LIST_FILE} ] && echo -n "" > $LIST_FILE || touch $LIST_FILE 
+ 
+#[ -z LIST_FILE ] && echo "" > $LIST_FILE  || touch "$LIST_FILE"  &>/dev/null
 
 
 # _ERROR_ $CODE
@@ -59,7 +61,8 @@ function _ERROR_() {
 
   case $ERROR_CODE in
     1)
-      error_text "Missing or invalid input for argument 1 (gen file). Setting a default value of /tmp/findlinks.lst" ;;
+      error_text "Missing or invalid input for argument 1 (gen file). Setting a default value of /tmp/findlinks.lst" 
+      LIST_FILE="/tmp/findlinks.lst" ;;
     2)
       error_text "Missing function input argument 2 (Host Identifier). Setting a default value of 0 (Pixeldrain)" ;;
     3)
@@ -67,18 +70,18 @@ function _ERROR_() {
     4)
       error_text "Missing function input argument 1 (Amount). Setting a default value of 100 lines" ;;
     5)
-      error_text "4 parameters expected." 
-      echo -e "ex.\t$(tput bold)./findlinks.sh genlist.txt 50 0 5\t$tput setaf 2)# Generate and test 50 urls for pixeldrain; delay of 5s\n"
+      error_text "4 parameters expected. See below. " 
+      printf "$0 genlist.txt 50 0 5\t%s%s# Generate and test 50 urls for pixeldrain; delay of 5s\n" $(tput setaf 0; tput bold) $(tput setaf 2) && exit 1 #$(tput setaf 2) && exit 1  
       exit 1
       ;;
     6)
-      error_text "Second parameter must be a number greater than 0" 
+      error_text "Second parameter (urls to generate and test) must be a number greater than 0." 
       exit 1;;
     7)
-      error_text "Second parameter must be a number greater than 0" 
+      error_text "Third parameter (filehost identifier) must be a number greater than or equal to 0." 
       exit 1;;
     8)
-      error_text "Second parameter must be a number greater than 0" 
+      error_text "Fourth parameter (delay) must be a number greater than 0." 
       exit 1;; 
   esac   
       
@@ -90,35 +93,44 @@ function _ERROR_() {
 #
 fuzzAPI() {
 
-  local TRY_COUNT=$GEN_TOTAL    # Fuzz Attempts 
+  local TRY_COUNT=$(cat $LIST_FILE | wc -l)   # Fuzz Attempts 
   local SUCCESS_COUNT=0         # Successful Responses
   local ERROR_COUNT=0           # Unsuccessful Responses
   local CURL_RETURN_CODE=""     # HTTP response code
+  local HTTP_CODE=""
   
-  printf "$(date '+%y-%m-%d') : Fuzzing will begin with the folowing parameters:\n\t\tTarget: %s    Attempts: %u    Delay: %u\n" $HOST $TRY_COUNT $FUZZ_DELAY
+  printf "$(tput sgr0; date '+%y-%m-%d')"
+  printf "$(tput setaf 32) Fuzzing will begin with the folowing parameters:\n\n$(tput bold;tput setaf 0)Breakdown $(tput setaf 7)\tTarget: %s\n\tAttempts: %u\n\tDelay: %u\n\n" $HOST $TRY_COUNT $FUZZ_DELAY
 
+  printf "\n$(tput setaf 234; tput bold)STATS:"
   while IFS="" read -r LINE; do 
 
-    printf "Current attempt: https://pixeldrain.com/api/file/%s/info\n\n" $LINE
-    printf "Filtered Response: "
-    curl --silent -w CURL_RETURN_CODE=%{http_code} https://pixeldrain.com/api/file/$LINE/info | awk -F',' '{print $1}' | sed 's/{//g' 
-    
-    if [ $CURL_RETURN_CODE = 200 ]; then 
-      ((SUCCESS_COUNT++))
+ 
+    printf "\n$(tput setaf 31; tput bold)Error count:$(tput sgr0) %u " $ERROR_COUNT 
+    printf "\n$(tput setaf 31; tput bold)Current attempt:$(tput sgr0) https://pixeldrain.com/api/file/%s/info\n" "$(tput setaf 131)$LINE$(tput sgr0)"
+    printf "$(tput setaf 31; tput bold)Filtered Response:\t $(tput sgr0)"  
+    CURL_RETURN_CODE="$(curl --silent -w %{http_code} https://pixeldrain.com/api/file/$LINE/info)"
+    HTTP_CODE=$(tail -n1 <<< "$CURL_RETURN_CODE")    
+
+    # "$(tput setaf 31;tput bold)Response Code: %{http_code}\n$(tput sgr0)
+    if [[ $HTTP_CODE  -eq 200 ]]; then 
+      ((SUCCESS_COUNT++)) && echo -e "$(tput setaf 2)200 - SUCCESS$(tput sgr0)"
       # Store link
-      # Success_count + 1
-      # 
-    else
+    elif [[ $HTTP_CODE -eq 404 ]]; then 
       ((ERROR_COUNT++))
-      printf "\nError count: %u " $ERROR_COUNT 
+      echo "404"
+    else 
+      ((ERROR_COUNT++))
+      echo $HTTP_CODE       
     fi
 
     sleep $FUZZ_DELAY 
     ((TRY_COUNT--))
-  done < $FILE
+  done < $LIST_FILE
 }
 
-function fixFmt() { cat $LIST_FILE  tr -d "[:blank:]" &>$LIST_FILE ; }
+
+#function fixFmt() { cat $LIST_FILE  tr -d "[:blank:]" &>$LIST_FILE ; }
 
 
 # https://pixeldrain.com 
@@ -133,16 +145,21 @@ function genPixelDrain() {
 
   local LENGTH=8          
   local GEN_STRING=""     
-                          
+  rm $LIST_FILE                         
+  printf "\n%sGenerating list for Pixeldrain%s ." $(tput bold; tput setaf 6) $(tput sgr0) && sleep 1 && printf "." && sleep 1 \
+                                            && printf ".\n" && sleep 1
+
   while [ $GEN_TOTAL -gt 0 ]; do
     GEN_STRING=$(echo -n $(tr -dc A-Za-z0-9 </dev/urandom | head -c $LENGTH))   
-    echo "$(echo -e "$z " | tr -d "[:blank:]")" >> $LIST_FILE && (( GEN_TOTAL-- ))   
+    echo "$(echo -e $GEN_STRING | tr -d "[:blank:]")" >> $LIST_FILE
+    ((GEN_TOTAL--))   
   done
 
-  # One last cleaning of the file
-  fixFmt 
-
-  # Begin Fuzz. Pixeldrain has a public api that does not require authentication (to do this)
+  printf "Success:\t%s\n\n" "$(tput bold)$(pwd)/$LIST_FILE$(tput sgr0)"  
+  #fixFmt 
+ 
+  # Begin Fuzz
+  printf "Done.\n\n"
   fuzzAPI 
 
 }
@@ -160,8 +177,8 @@ function genDataSet() {
 
   case $GEN_TYPE in
     0)
+      HOST="Pixeldrain"    
       genPixelDrain 
-      HOST="Pixeldrain"
       ;;
     1)
       # upload.to
@@ -181,18 +198,21 @@ function genDataSet() {
 function banner() {
 
   clear 
-
-  echo -e "\t\t██████╗ ████████╗██████╗ ██╗  ██╗   ███╗   ██╗███████╗████████╗"
-  echo -e "\t\t██╔══██╗╚══██╔══╝██╔══██╗██║  ██║   ████╗  ██║██╔════╝╚══██╔══╝"
-  echo -e "\t\t██║  ██║   ██║   ██████╔╝███████║   ██╔██╗ ██║█████╗     ██║   "
-  echo -e "\t\t██║  ██║   ██║   ██╔══██╗██╔══██║   ██║╚██╗██║██╔══╝     ██║   "
-  echo -e "\t\t██████╔╝   ██║   ██║  ██║██║  ██║██╗██║ ╚████║███████╗   ██║   "
-  echo -e "\t\t╚═════╝    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   "
-  echo -e "\t\t\t\t\t\t"
-  echo -e "\t\t\t\t\t\t" 
   echo -e " "
+  echo -e " "
+  echo -e "\t██████╗ ████████╗██████╗ ██╗  ██╗   ███╗   ██╗███████╗████████╗"
+  echo -e "\t██╔══██╗╚══██╔══╝██╔══██╗██║  ██║   ████╗  ██║██╔════╝╚══██╔══╝"
+  echo -e "\t██║  ██║   ██║   ██████╔╝███████║   ██╔██╗ ██║█████╗     ██║   "
+  echo -e "\t██║  ██║   ██║   ██╔══██╗██╔══██║   ██║╚██╗██║██╔══╝     ██║   "
+  echo -e "\t██████╔╝   ██║   ██║  ██║██║  ██║██╗██║ ╚████║███████╗   ██║   "
+  echo -e "\t╚═════╝    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   "
+  echo -e "\t$(tput bold)KBS\n\t$(tput setaf 1)admin@dtrh.net"
+  echo -e "\t\t\t\t\t"
+  echo -e "\t\t\t\t\t" 
+  echo -e "findlinks.sh\t\t\t\tNov 15, 2023$(tput sgr0)"
+  echo -e "A versatile script for finding fileshare hosting links"
   
-  sleep 5
+  sleep 2
 }
 
 # fixArgs 
@@ -201,10 +221,22 @@ function banner() {
 #           and correct any issues as well as throw error warnings. 
 function fixArgs() {
 
+  # I'm sure there is a better way to go about doing this between  the checks below and the checks found in fixArgs()
+  # These rudimentary checks ensure the proper amount of parameters are passed and that the last three which expect 
+  # positive inters do not contain letters.
+  #
+  # [[ $(($#-1)) -ne 4 ]] && printf "%s\n!! $0 requires 4 parameters%s\n$0 genlist.txt 50 0 5\t%s%s# Generate and test 50 urls for pixeldrain; delay of 5s\n" $(tput setaf 1) $(tput setaf 0; tput bold) $(tput setaf 2) && exit 1 #$(tput setaf 2) && exit 1  
+
+  printf "\n%sParameter Test:\n%s" $(tput setaf 6; tput bold) $(tput sgr0) #$(tput setaf sgr0)
+  [[ $(($ARGV-1)) -ne 4 ]] && printf "Total Parameters: \t%sGood%s\t%s%s Parameters\n%s"                $(tput setaf 2) $(tput sgr0) $(tput bold) $ARGV       $(tput sgr0) || _ERROR_ "5"
+  [[ $GEN_TOTAL =~ (^[!0-9]) ]] && printf "Parameter 2: \t%sGood%s\t%sGenerate and Test %s urls\n%s"    $(tput setaf 2) $(tput sgr0) $(tput bold) $GEN_TOTAL  $(tput sgr0) || _ERROR_ "6"
+  [[ $GEN_TYPE =~ (^[!0-9]) ]] && printf "Parameter 3: \t%sGood%s\t%sFilehost target is Pixeldrain\n%s" $(tput setaf 2) $(tput sgr0) $(tput bold) $(tput sgr0)  || _ERROR_ "7"  ## TODO
+  [[ $FUZZ_DELAY =~ (^[!0-9]) ]] && printf "Parameter 4: \t%sGood%s\t%sSend delay set to %s%s\n"        $(tput setaf 2) $(tput sgr0) $(tput bold) $(tput sgr0) $FUZZ_DELAY || _ERROR_ "8"
+
   # These checks do not result in the program exiting 
   # Will likely label these warnings moving forward..
   #
-  [ -z $LIST_FILE ] && LIST_FILE='/tmp/findlinks.lst' && _ERROR_ "1"
+  #[ -z $LIST_FILE ] && LIST_FILE='/tmp/findlinks.lst' && _ERROR_ "1"
   [ -z $GEN_TYPE ] && GEN_TYPE=0 && _ERROR_ "2"
   [ -z $FUZZ_DELAY ] && $LENGTH=5 && _ERROR_ "3"      
   [ -z $GEN_TOTAL ] && GEN_TOTAL=100 && _ERROR_ "4"
@@ -218,16 +250,7 @@ function main() {
   fixArgs    
   genDataSet 
   exit 0
-  
-}
 
-# I'm sure there is a better way to go about doing this between  the checks below and the checks found in fixArgs()
-# These rudimentary checks ensure the proper amount of parameters are passed and that the last three which expect 
-# positive inters do not contain letters.
-#
-[[ $(($#-1)) -ne 4 ]] && _ERROR_ "5"   
-[[ $2 =~ (^[!0-9]) ]] && _ERROR_ "6"
-[[ $3 =~ (^[!0-9]) ]] && _ERROR_ "7"
-[[ $4 =~ (^[!0-9]) ]] && _ERROR_ "8"
+}
 
 main 
