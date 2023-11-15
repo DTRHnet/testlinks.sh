@@ -231,6 +231,3 @@ function main() {
 [[ $4 =~ (^[!0-9]) ]] && _ERROR_ "8"
 
 main 
-}
-
-main 
