@@ -9,48 +9,79 @@
 #  the cGen() function can be called with arguments dictating the length and amount of unique links
 #  to generate. And anything else is easily modified within.
 #
-# 
+#  ./findlinks.sh ~/urls.lst 100 0 2       # Generate and test 100 links formatted for 
+                                           # pixeldrain.com at a rate of one attempt every 2s 
 
-# Global Variables ---
-FILE=$1 
-HOST="https://pixeldrain.com/u/"
-TSTRING="200 OK"
+# I/O Globals ----
+                  # Default Value     Summary
+                  #
+LIST_FILE=$1      # (/tmp/links.lst)  Where will the list be created, and under what name 
+GEN_TOTAL=$2      # (100)             How many links will be generated and test
+GEN_TYPE=$3       # (0)               What host company method will be used
+FUZZ_DELAY=$4     # (5)               How much delay between attempts         
 
-# Set to nothing, as I processed it earlier in cGen(). "" represents new line, could also be "\n"
-IFS=""
-_UL="$(tput smul)" && _rUL="$(tput rmul)"
-# Array to hold any file hits later..
-# This way the hit list can be accessed with   ${validFiles[$x]}
-# where $x is a loop variable of indices, ${validFiles[$x]} is one
-# element of the array, depending on $x.
-declare -a validFiles=()
-
-# Create a fresh new file to be used  as a home
-# for the random URL generation
+# Array with indices that correlate with $GEN_TYPE 
+# ex. ${HOSTS[0]}="https://pixeldrain.com/u/" 
 #
-#                     #   v Exists v    
-cat "$FILE" &>/dev/null && rm $FILE; #  Does not exist 
-touch "$FILE"   # Recreate it
+HOSTS=(https://pixeldrain.com/u/ https://mega.nz https://upload.to)
+HOST=""
 
-# Function to generate lines of alphanumeric strings including upper/lower case letters
-# Local variables are used in place of hard coded numbers to to increase similar use case 
-# compatibility. Arg 1 for length, arg 2 for amount of unique lines.                         
-#                    cGen 8 100  # <- 100x linex at 8 characters long                                
+                                              # LEFT                  CENTER                RIGHT       
+IFS=""                                        # 1       25      50      75      100     125     150 
+tabs 1, 25, 50, 75, 100, 125, 150             # |<- - - | - - - | - - - + - - - | - - - | - - ->|
 
-function cGen() {      # $1 $2   #       
 
-  len=$1
-  x=$2
-  z=$2
+# This associative array will hold the randomized data portion of a url which is tested and returns
+# a successful response code (200). Its elements will be accessed via it's associative indices 
+# beginning at 0 and can effectively be parsed with a simple loop and counter.
+#
+# ex. for x in ${!valid_url[@]}; do echo "$valid_url[$x]; done"  
+valid_url=()
 
-  echo -e "$_UL\033[39;1m\n1. Generating unique URL list based off parameters:$_rUL \033[34;1m\t$len Characters long\n\t\t\t$x links to generate." 
-  if ! [ $len = "" ]; then len=8; fi  # For if !value
-  if [ $x = "" ]; then echo "Remember: Arg1 = length, Arg2 = amount"; fi 
-  while [ $x -gt 0 ]; do
-    z=$(echo -n $(tr -dc A-Za-z0-9 </dev/urandom | head -c $1))    # <- As it loops counting $x down, 
-    echo "$(echo -e "$z " | tr -d "[:blank:]")" >> $FILE && (( x=$x-1 ))  # <- each unique URL is appended to 
-  done
+# If it already exists, empty the file which will be used to store the randomly generated data set. 
+# Otherwise, create a new file to work with
+[ -f ${LIST_FILE} ] && echo -n "" > $LIST_FILE || touch $LIST_FILE 
 
+
+# _ERROR_ $CODE
+#
+# Summary : Call _ERROR_ with a code value when an anticipated error could occur;
+#           Return a visual indication something went wrong, optionally log it (TODO)
+#           Ideally correct the issue so the script will continue to execute, or exit with code 1
+#
+function _ERROR_() {
+
+  ERROR_CODE=$1
+
+  function error_text() {    
+    echo -e "$(tput setaf 4)\033[91;1m[ ERROR (code $ERROR_CODE) ] $1 Script may not run as expected [ -- ]$(tput sgr0)\n" 
+  }
+
+  case $ERROR_CODE in
+    1)
+      error_text "Missing or invalid input for argument 1 (gen file). Setting a default value of /tmp/findlinks.lst" ;;
+    2)
+      error_text "Missing function input argument 2 (Host Identifier). Setting a default value of 0 (Pixeldrain)" ;;
+    3)
+      error_text "Missing function input argument 3 (Delay). Setting a default value of 5 seconds" ;;
+    4)
+      error_text "Missing function input argument 1 (Amount). Setting a default value of 100 lines" ;;
+    5)
+      error_text "4 parameters expected." 
+      echo -e "ex.\t$(tput bold)./findlinks.sh genlist.txt 50 0 5\t$tput setaf 2)# Generate and test 50 urls for pixeldrain; delay of 5s\n"
+      exit 1
+      ;;
+    6)
+      error_text "Second parameter must be a number greater than 0" 
+      exit 1;;
+    7)
+      error_text "Second parameter must be a number greater than 0" 
+      exit 1;;
+    8)
+      error_text "Second parameter must be a number greater than 0" 
+      exit 1;; 
+  esac   
+      
 }
 
 # fuzzAPI - Put this work to good use and find some links!
@@ -59,64 +90,147 @@ function cGen() {      # $1 $2   #
 #
 fuzzAPI() {
 
-  x=$(cat $FILE | wc -l)
-  y=$x
-  z=0
-  DELAY=2
-  while IFS="" read -r LINE; do
-    (( x=$x-1 ))
-    tput setab 12; echo -ne "\n\033[139;5;1m$(date)$(tput setaf 226) [ OPERATION - FUZZING ] -------------------- [ Testing $x url of $y generated.. $z links so far ] ";tput sgr0;  
-    echo -en "$(tput setab 195)"
-    echo -e "\nBeginning fuzz: Testing for api response at address:\n\033[30;1mhttps://pixeldrain.com/api/file/\033[31;1m$LINE\033[30;1m/info" # $LINE #& >/dev/null 
-    echo -e "$(tput bold)\t\033[36;1m" && echo -ne "API Response:\t "
-    curl --silent https://pixeldrain.com/api/file/"$LINE"/info | awk -F',' '{print $3}' | sed 's/}//g' #$LINE  
+  local TRY_COUNT=$GEN_TOTAL    # Fuzz Attempts 
+  local SUCCESS_COUNT=0         # Successful Responses
+  local ERROR_COUNT=0           # Unsuccessful Responses
+  local CURL_RETURN_CODE=""     # HTTP response code
+  
+  printf "$(date '+%y-%m-%d') : Fuzzing will begin with the folowing parameters:\n\t\tTarget: %s    Attempts: %u    Delay: %u\n" $HOST $TRY_COUNT $FUZZ_DELAY
 
-    sleep 1 
+  while IFS="" read -r LINE; do 
+
+    printf "Current attempt: https://pixeldrain.com/api/file/%s/info\n\n" $LINE
+    printf "Filtered Response: "
+    curl --silent -w CURL_RETURN_CODE=%{http_code} https://pixeldrain.com/api/file/$LINE/info | awk -F',' '{print $1}' | sed 's/{//g' 
+    
+    if [ $CURL_RETURN_CODE = 200 ]; then 
+      ((SUCCESS_COUNT++))
+      # Store link
+      # Success_count + 1
+      # 
+    else
+      ((ERROR_COUNT++))
+      printf "\nError count: %u " $ERROR_COUNT 
+    fi
+
+    sleep $FUZZ_DELAY 
+    ((TRY_COUNT--))
   done < $FILE
 }
+
+function fixFmt() { cat $LIST_FILE  tr -d "[:blank:]" &>$LIST_FILE ; }
+
+
+# https://pixeldrain.com 
+#
+# Details : Hostname is followed with '/u/xxxxxxxx' where x represents an lower case character [a-z] 
+#           uppercase character [A-Z] or number [0-9].
+#
+# Randomized Data Example:  l54eIfWz
+#             URL Example:  https://pixeldrain.com/u/api/file/l54eIfWz/info 
+#
+function genPixelDrain() {
+
+  local LENGTH=8          
+  local GEN_STRING=""     
+                          
+  while [ $GEN_TOTAL -gt 0 ]; do
+    GEN_STRING=$(echo -n $(tr -dc A-Za-z0-9 </dev/urandom | head -c $LENGTH))   
+    echo "$(echo -e "$z " | tr -d "[:blank:]")" >> $LIST_FILE && (( GEN_TOTAL-- ))   
+  done
+
+  # One last cleaning of the file
+  fixFmt 
+
+  # Begin Fuzz. Pixeldrain has a public api that does not require authentication (to do this)
+  fuzzAPI 
+
+}
+
+
+# genDataSet 
+#                                  
+# Summary : genDataSet now uses global variables, and checks have been implemented so
+#           this function sorts how the script will handle the input and should there be room to
+#           expand, this will serve as a good point between when the list is generated and when
+#           the script begins fuzzing against the host. 
+#           The call to fuzz is currently made from the generation functions.
+#     
+function genDataSet() {
+
+  case $GEN_TYPE in
+    0)
+      genPixelDrain 
+      HOST="Pixeldrain"
+      ;;
+    1)
+      # upload.to
+      ;;
+    2)
+      # megaupload
+      ;;
+    3)
+      # etc..
+      ;;
+  esac 
+
+}
+
+
 
 function banner() {
 
   clear 
-  #echo -e "$(
-  echo -e "$(tput setaf 230; tput setab 24)"
 
-  echo -e "                                                                                     "  
-  echo -e "                                                                                     "
-  echo -e "           ██████╗ ████████╗██████╗ ██╗  ██╗   ███╗   ██╗███████╗████████╗           "
-  echo -e "           ██╔══██╗╚══██╔══╝██╔══██╗██║  ██║   ████╗  ██║██╔════╝╚══██╔══╝           "
-  echo -e "           ██║  ██║   ██║   ██████╔╝███████║   ██╔██╗ ██║█████╗     ██║              "
-  echo -e "           ██║  ██║   ██║   ██╔══██╗██╔══██║   ██║╚██╗██║██╔══╝     ██║              "
-  echo -e "           ██████╔╝   ██║   ██║  ██║██║  ██║██╗██║ ╚████║███████╗   ██║              "
-  echo -e "           ╚═════╝    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝              "
-  echo -e "                                                                                     "
-  echo -e "                                                                                     "
-  echo -en "$(tput sgr0)" 
-
-  tabs 1,35,50,75,100
-  echo -e "\n\n\033[36;1mRandom filehost URL Generater/Tester\n\033[36;0mConfigured for www.pixeldrain.com..\n\n\033[31;1mHTTPS://DTRH.NET\t\t\tdtrh.net | admin@\033[1;1m"
-  echo -e "\n"
-
+  echo -e "\t\t██████╗ ████████╗██████╗ ██╗  ██╗   ███╗   ██╗███████╗████████╗"
+  echo -e "\t\t██╔══██╗╚══██╔══╝██╔══██╗██║  ██║   ████╗  ██║██╔════╝╚══██╔══╝"
+  echo -e "\t\t██║  ██║   ██║   ██████╔╝███████║   ██╔██╗ ██║█████╗     ██║   "
+  echo -e "\t\t██║  ██║   ██║   ██╔══██╗██╔══██║   ██║╚██╗██║██╔══╝     ██║   "
+  echo -e "\t\t██████╔╝   ██║   ██║  ██║██║  ██║██╗██║ ╚████║███████╗   ██║   "
+  echo -e "\t\t╚═════╝    ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   "
+  echo -e "\t\t\t\t\t\t"
+  echo -e "\t\t\t\t\t\t" 
+  echo -e " "
+  
   sleep 5
 }
 
-# Empty whitespace can cause parsing issues
-function fixFmt() { cat $FILE  tr -d "[:blank:]" &>/tmp/1.txt ; }
-
-# Put it all together in the main function
-# A little overkill, but did some return status checks and added some colour.
+# fixArgs 
 #
+# Summary : This is going to be a lot more functional. Check all the input arguments ahead of time
+#           and correct any issues as well as throw error warnings. 
+function fixArgs() {
+
+  # These checks do not result in the program exiting 
+  # Will likely label these warnings moving forward..
+  #
+  [ -z $LIST_FILE ] && LIST_FILE='/tmp/findlinks.lst' && _ERROR_ "1"
+  [ -z $GEN_TYPE ] && GEN_TYPE=0 && _ERROR_ "2"
+  [ -z $FUZZ_DELAY ] && $LENGTH=5 && _ERROR_ "3"      
+  [ -z $GEN_TOTAL ] && GEN_TOTAL=100 && _ERROR_ "4"
+
+}
+
 
 function main() {
 
-  banner 
-  cGen 8 100; [[ $? != 0 ]] && echo -e "\033[37;0mList created \033[32;1msuccessfully!" >&2 ||  echo -e "\033[37mSomething went \033[31;1mwrong.." 
-  echo -e "\033[37;0mSaved data to \033[32;0m$FILE!\n\033[37;0m\n$_UL\033[39;1m2. Cleaning any whitespace in $FILE$_rUL\n"
-  fixFmt 
-  fuzzAPI   
-  #tput sgr0
-  #uGen 
+  banner
+  fixArgs    
+  genDataSet 
   exit 0
+  
+}
+
+# I'm sure there is a better way to go about doing this between  the checks below and the checks found in fixArgs()
+# These rudimentary checks ensure the proper amount of parameters are passed and that the last three which expect 
+# positive inters do not contain letters.
+#
+[[ $(($#-1)) -ne 4 ]] && _ERROR_ "5"   
+[[ $2 =~ (^[!0-9]) ]] && _ERROR_ "6"
+[[ $3 =~ (^[!0-9]) ]] && _ERROR_ "7"
+[[ $4 =~ (^[!0-9]) ]] && _ERROR_ "8"
+
+main 
 }
 
 main 
