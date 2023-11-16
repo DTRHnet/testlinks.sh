@@ -37,7 +37,7 @@ tabs 1, 25, 50, 75, 100, 125, 150             # |<- - - | - - - | - - - + - - - 
 # beginning at 0 and can effectively be parsed with a simple loop and counter.
 #
 # ex. for x in ${!valid_url[@]}; do echo "$valid_url[$x]; done"  
-valid_url=()
+declare -A valid_url=""
 
 # If it already exists, empty the file which will be used to store the randomly generated data set. 
 # Otherwise, create a new file to work with
@@ -96,6 +96,7 @@ fuzzAPI() {
   local TRY_COUNT=$(cat $LIST_FILE | wc -l)   # Fuzz Attempts 
   local SUCCESS_COUNT=0         # Successful Responses
   local ERROR_COUNT=0           # Unsuccessful Responses
+  local CURL_FUZZ_ADDRESS=""    # Full url to fuzz
   local CURL_RETURN_CODE=""     # HTTP response code
   local HTTP_CODE=""
   
@@ -103,22 +104,25 @@ fuzzAPI() {
   printf "$(tput setaf 32) Fuzzing will begin with the folowing parameters:\n\n$(tput bold;tput setaf 0)Breakdown $(tput setaf 7)\tTarget: %s\n\tAttempts: %u\n\tDelay: %u\n\n" $HOST $TRY_COUNT $FUZZ_DELAY
 
   printf "\n$(tput setaf 234; tput bold)STATS:"
-  while IFS="" read -r LINE; do 
+  while [[ TRY_COUNT -gt 0 ]];  do
+   
+    ((TRY_COUNT--));
+    read -r LINE 
 
- 
-    printf "\n$(tput setaf 31; tput bold)Error count:$(tput sgr0) %u " $ERROR_COUNT 
-    printf "\n$(tput setaf 31; tput bold)Current attempt:$(tput sgr0) https://pixeldrain.com/api/file/%s/info\n" "$(tput setaf 131)$LINE$(tput sgr0)"
+    printf "\n$(tput setaf 31; tput bold)Error count:%s\t\t$(tput setaf 31)Success Count: %s $(tput sgr0)\t$(date +"%H:%M:%S")" $ERROR_COUNT $SUCCESS_COUNT 
+    printf "\n$(tput setaf 31; tput bold)Current attempt:$(tput sgr0) https://pixeldrain.com/api/file/$LINE/info\n" "$(tput setaf 131)$LINE$(tput sgr0)"
     printf "$(tput setaf 31; tput bold)Filtered Response:\t $(tput sgr0)"  
     CURL_RETURN_CODE="$(curl --silent -w %{http_code} https://pixeldrain.com/api/file/$LINE/info)"
     HTTP_CODE=$(tail -n1 <<< "$CURL_RETURN_CODE")    
 
-    # "$(tput setaf 31;tput bold)Response Code: %{http_code}\n$(tput sgr0)
     if [[ $HTTP_CODE  -eq 200 ]]; then 
-      ((SUCCESS_COUNT++)) && echo -e "$(tput setaf 2)200 - SUCCESS$(tput sgr0)"
-      # Store link
+      printf "$(tput setaf 2)\t200 - Success$(tput sgr0)"
+      valid_url[$SUCCESS_COUNT]=$(echo -e "http://pixeldrain.com/u/$LINE") 
+      ((SUCCESS_COUNT++))
+
     elif [[ $HTTP_CODE -eq 404 ]]; then 
       ((ERROR_COUNT++))
-      echo "404"
+      printf "\t404 - Not Found"
     else 
       ((ERROR_COUNT++))
       echo $HTTP_CODE       
@@ -126,11 +130,13 @@ fuzzAPI() {
 
     sleep $FUZZ_DELAY 
     ((TRY_COUNT--))
+
   done < $LIST_FILE
+
+  echo ${valid_url[@]} >> "./results/results.txt" 
+  echo ${valid_url[@]} 
+
 }
-
-
-#function fixFmt() { cat $LIST_FILE  tr -d "[:blank:]" &>$LIST_FILE ; }
 
 
 # https://pixeldrain.com 
